@@ -769,4 +769,96 @@ curl https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes/f1c46410-9905-
 {"attachment":"hello.jpg","content":"Hello World","createdAt":1702396130513,"noteId":"f1c46410-9905-11ee-b0a5-1d3f34358d8e","userId":"123"}
 ```
 
+```bash
+|  Invoked packages/functions/src/get.main
+|  Built packages/functions/src/get.main
+|  Done in 2548ms
+```
+
+---
+
+### Add an API to List All the Notes
+
+- Add an API that returns a list of all the notes a user has to `packages/functions/src/list.ts`
+- This is pretty much the same as our `get.ts` except we use a condition to only return the items that have the same `userId` as the one we are passing in.
+
+```ts
+// packages/functions/src/list.ts
+import { Table } from "sst/node/table";
+import handler from "@notes/core/handler";
+import dynamoDb from "@notes/core/dynamodb";
+
+export const main = handler(async (event) => {
+  const params = {
+    TableName: Table.Notes.tableName,
+    // 'KeyConditionExpression' defines the condition for the query
+    // - 'userId = :userId': only return items with matching 'userId'
+    //   partition key
+    KeyConditionExpression: "userId = :userId",
+    // 'ExpressionAttributeValues' defines the value in the condition
+    // - ':userId': defines 'userId' to be the id of the author
+    ExpressionAttributeValues: {
+      ":userId": "123",
+    },
+  };
+
+  const result = await dynamoDb.query(params);
+
+  // Return the matching list of items in response body
+  return JSON.stringify(result.Items);
+});
+```
+
+### Add the Route
+
+- In `stacks/ApiStack.ts` we add to the `routes` object a key/value pair `"GET /notes": "packages/functions/src/list.main",`
+
+```ts
+import { Api, StackContext, use } from "sst/constructs";
+import { StorageStack } from "./StorageStack";
+
+export function ApiStack({ stack }: StackContext) {
+  const { table } = use(StorageStack);
+
+  // Create the API
+  const api = new Api(stack, "Api", {
+    defaults: {
+      function: {
+        bind: [table],
+      },
+    },
+    routes: {
+      "POST /notes": "packages/functions/src/create.main",
+      "GET /notes/{id}": "packages/functions/src/get.main",
+      // create a new GET /notes route (to get all notes)
+      "GET /notes": "packages/functions/src/list.main",
+    },
+  });
+
+  stack.addOutputs({
+    ApiEndpoint: api.url,
+  });
+
+  return {
+    api,
+  };
+}
+```
+
+### Test the API
+
+- We get back an Array of Notes
+
+```bash
+curl https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes
+
+[{"attachment":"hello.jpg","content":"Hello World","createdAt":1702396130513,"noteId":"f1c46410-9905-11ee-b0a5-1d3f34358d8e","userId":"123"},{"attachment":"hello.jpg","content":"Hello World","createdAt":1702398301821,"noteId":"fff7b2d0-990a-11ee-b964-a919c44c56a1","userId":"123"}]
+```
+
+```bash
+|  Invoked packages/functions/src/list.main
+|  Built packages/functions/src/list.main
+|  Done in 1887ms
+```
+
 ---

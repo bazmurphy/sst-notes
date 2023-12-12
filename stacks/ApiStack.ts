@@ -12,10 +12,12 @@ export function ApiStack({ stack }: StackContext) {
       },
     },
     routes: {
-      // create a new POST /notes route
+      // create a new POST /notes route (to create a new note)
       "POST /notes": "packages/functions/src/create.main",
-      // create a new GET /notes/{id} route
+      // create a new GET /notes/{id} route (to get a single note by id)
       "GET /notes/{id}": "packages/functions/src/get.main",
+      // create a new GET /notes route (to get all notes)
+      "GET /notes": "packages/functions/src/list.main",
     },
   });
 
