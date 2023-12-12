@@ -845,6 +845,24 @@ export function ApiStack({ stack }: StackContext) {
 }
 ```
 
+```bash
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack Api/Lambda_GET_--notes/ServiceRole AWS::IAM::Role CREATE_COMPLETE
+|  ApiStack Api/Lambda_GET_--notes/ServiceRole/DefaultPolicy AWS::IAM::Policy CREATE_COMPLETE
+|  ApiStack Api/Lambda_GET_--notes AWS::Lambda::Function CREATE_COMPLETE
+|  ApiStack Api/Route_GET_--notes/Integration_GET_--notes AWS::ApiGatewayV2::Integration CREATE_COMPLETE
+|  ApiStack Api/Route_GET_--notes AWS::Lambda::Permission CREATE_COMPLETE
+|  ApiStack Api/Lambda_GET_--notes/EventInvokeConfig AWS::Lambda::EventInvokeConfig CREATE_COMPLETE
+|  ApiStack Api/Route_GET_--notes AWS::ApiGatewayV2::Route CREATE_COMPLETE
+|  ApiStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+
+✔  Deployed:
+   StorageStack
+   ApiStack
+   ApiEndpoint: https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com
+```
+
 ### Test the API
 
 - We get back an Array of Notes
@@ -867,7 +885,7 @@ curl https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes
 
 - Create an API that allows a user to update a `note` with a new `note object` given the `id`
 
-## Add the Function
+### Add the Function
 
 - Create a new file `packages/functions/src/update.ts`
 - This should look similar to the `create.ts` function combined.
@@ -909,7 +927,7 @@ export const main = handler(async (event) => {
 
 ### Add the Route
 
-- In `stacks/ApiStack.ts` we add to the `routes` object a key/value pair `"GET /notes": "packages/functions/src/list.main",`
+- In `stacks/ApiStack.ts` we add to the `routes` object a key/value pair `"PUT /notes/{id}": "packages/functions/src/update.main",`
 
 ```ts
 import { Api, StackContext, use } from "sst/constructs";
@@ -944,6 +962,24 @@ export function ApiStack({ stack }: StackContext) {
 }
 ```
 
+```bash
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack Api/Lambda_PUT_--notes--{id}/ServiceRole AWS::IAM::Role CREATE_COMPLETE
+|  ApiStack Api/Lambda_PUT_--notes--{id}/ServiceRole/DefaultPolicy AWS::IAM::Policy CREATE_COMPLETE
+|  ApiStack Api/Lambda_PUT_--notes--{id} AWS::Lambda::Function CREATE_COMPLETE
+|  ApiStack Api/Route_PUT_--notes--{id}/Integration_PUT_--notes--{id} AWS::ApiGatewayV2::Integration CREATE_COMPLETE
+|  ApiStack Api/Lambda_PUT_--notes--{id}/EventInvokeConfig AWS::Lambda::EventInvokeConfig CREATE_COMPLETE
+|  ApiStack Api/Route_PUT_--notes--{id} AWS::Lambda::Permission CREATE_COMPLETE
+|  ApiStack Api/Route_PUT_--notes--{id} AWS::ApiGatewayV2::Route CREATE_COMPLETE
+|  ApiStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+
+✔  Deployed:
+   StorageStack
+   ApiStack
+   ApiEndpoint: https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com
+```
+
 ### Test the API
 
 ```bash
@@ -971,6 +1007,108 @@ https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes/fff7b2d0-990a-11ee-
 |  +1692ms   }
 |  +1692ms }
 |  Done in 1698ms
+```
+
+---
+
+### Add an API to Delete a Note
+
+- Create an API that allows a user to delete a given note.
+
+### Add the Function
+
+- Create a new file `packages/functions/src/delete.ts`
+- This makes a DynamoDB delete call with the `userId` & `noteId` key to delete the note.
+
+```ts
+// packages/functions/src/delete.ts
+import { Table } from "sst/node/table";
+import handler from "@notes/core/handler";
+import dynamoDb from "@notes/core/dynamodb";
+
+export const main = handler(async (event) => {
+  const params = {
+    TableName: Table.Notes.tableName,
+    Key: {
+      userId: "123", // The id of the author
+      noteId: event?.pathParameters?.id, // The id of the note from the path
+    },
+  };
+
+  await dynamoDb.delete(params);
+
+  return JSON.stringify({ status: true });
+});
+```
+
+### Add the Route
+
+- In `stacks/ApiStack.ts` we add to the `routes` object a key/value pair `"DELETE /notes/{id}": "packages/functions/src/delete.main",`
+
+```ts
+import { Api, StackContext, use } from "sst/constructs";
+import { StorageStack } from "./StorageStack";
+
+export function ApiStack({ stack }: StackContext) {
+  const { table } = use(StorageStack);
+
+  // Create the API
+  const api = new Api(stack, "Api", {
+    defaults: {
+      function: {
+        bind: [table],
+      },
+    },
+    routes: {
+      "POST /notes": "packages/functions/src/create.main",
+      "GET /notes/{id}": "packages/functions/src/get.main",
+      "GET /notes": "packages/functions/src/list.main",
+      "PUT /notes/{id}": "packages/functions/src/update.main",
+      // create a DELETE /notes/{id} route (to delete a single note by id)
+      "DELETE /notes/{id}": "packages/functions/src/delete.main",
+    },
+  });
+
+  stack.addOutputs({
+    ApiEndpoint: api.url,
+  });
+
+  return {
+    api,
+  };
+}
+```
+
+```bash
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack Api/Lambda_DELETE_--notes--{id}/ServiceRole AWS::IAM::Role CREATE_COMPLETE
+|  ApiStack Api/Lambda_DELETE_--notes--{id}/ServiceRole/DefaultPolicy AWS::IAM::Policy CREATE_COMPLETE
+|  ApiStack Api/Lambda_DELETE_--notes--{id} AWS::Lambda::Function CREATE_COMPLETE
+|  ApiStack Api/Route_DELETE_--notes--{id}/Integration_DELETE_--notes--{id} AWS::ApiGatewayV2::Integration CREATE_COMPLETE
+|  ApiStack Api/Route_DELETE_--notes--{id} AWS::Lambda::Permission CREATE_COMPLETE
+|  ApiStack Api/Lambda_DELETE_--notes--{id}/EventInvokeConfig AWS::Lambda::EventInvokeConfig CREATE_COMPLETE
+|  ApiStack Api/Route_DELETE_--notes--{id} AWS::ApiGatewayV2::Route CREATE_COMPLETE
+|  ApiStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+
+✔  Deployed:
+   StorageStack
+   ApiStack
+   ApiEndpoint: https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com
+```
+
+### Test the API
+
+```bash
+curl -X DELETE https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes/fff7b2d0-990a-11ee-b964-a919c44c56a1
+
+{"status":true}
+```
+
+```bash
+|  Invoked packages/functions/src/delete.main
+|  Built packages/functions/src/delete.main
+|  Done in 1711ms
 ```
 
 ---

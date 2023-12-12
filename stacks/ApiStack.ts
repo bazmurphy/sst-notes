@@ -20,6 +20,8 @@ export function ApiStack({ stack }: StackContext) {
       "GET /notes": "packages/functions/src/list.main",
       // create a PUT /notes/{id} route (to update a single note by id)
       "PUT /notes/{id}": "packages/functions/src/update.main",
+      // create a DELETE /notes/{id} route (to delete a single note by id)
+      "DELETE /notes/{id}": "packages/functions/src/delete.main",
     },
   });
 
