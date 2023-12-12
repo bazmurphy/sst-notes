@@ -1,8 +1,10 @@
 # SST
 
+https://sst.dev/
+
 ---
 
-## Anatomy of a Lambda Function
+### Anatomy of a Lambda Function
 
 ![Anatomy of a Lambda Function](readme-images/anatomy-of-a-lambda-function.png)
 
@@ -1109,6 +1111,406 @@ curl -X DELETE https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes/fff7
 |  Invoked packages/functions/src/delete.main
 |  Built packages/functions/src/delete.main
 |  Done in 1711ms
+```
+
+---
+
+### Auth in Serverless Apps
+
+- We created a serverless REST API and deployed it. But there are a couple of things missing.
+
+  - It’s not secure
+  - And, it’s not linked to a specific user
+
+- These two problems are connected.
+- We need a way to allow users to sign up for our notes app and then only allow authenticated users to access it.
+
+### Public API Architecture
+
+- What we have so far:
+
+![Serverless Public API Architecture](readme-images/serverless-public-api-architecture.png)
+
+- Our users make a request to our `serverless API`.
+- It starts by hitting our `API Gateway endpoint`.
+- And depending on the endpoint we request, it’ll forward that request to the appropriate `Lambda function`.
+
+- In terms of access control, our `API Gateway endpoint` is allowed to invoke the `Lambda functions` we listed in the `routes` of our `stacks/ApiStack.ts`.
+- And if you’ll recall, our `Lambda functions` are allowed to connect to our `DynamoDB` `tables` with `bind: [table],`in `stacks/ApiStack.ts`
+
+```ts
+// stacks/ApiStack.ts
+import { Api, StackContext, use } from "sst/constructs";
+import { StorageStack } from "./StorageStack";
+
+export function ApiStack({ stack }: StackContext) {
+  const { table } = use(StorageStack);
+
+  const api = new Api(stack, "Api", {
+    defaults: {
+      function: {
+        bind: [table], // bind the table to our API
+      },
+    },
+    routes: {
+      "POST /notes": "packages/functions/src/create.main",
+      "GET /notes/{id}": "packages/functions/src/get.main",
+      "GET /notes": "packages/functions/src/list.main",
+      "PUT /notes/{id}": "packages/functions/src/update.main",
+      "DELETE /notes/{id}": "packages/functions/src/delete.main",
+    },
+  });
+
+  stack.addOutputs({
+    ApiEndpoint: api.url,
+  });
+
+  return {
+    api,
+  };
+}
+```
+
+- For uploading files, our users will **directly upload them to the S3 bucket.**
+- While we’ll look at how our frontend React app uploads files later in the guide, in this section we need to make sure that we secure access to it.
+
+### Authenticated API Architecture
+
+- To allow users to sign up for our notes app and to secure our infrastructure, we’ll be moving to an architecture that looks something like this.
+
+![Serverless Auth API Architecture](readme-images/serverless-auth-api-architecture.png)
+
+- Let’s go over all the separate parts in detail.
+
+- A couple of notes:
+
+  - The `Serverless API` portion in this diagram is exactly the same as the one we looked at before. It’s just simplified for the purpose of this diagram.
+
+  - Here the `user` effectively represents `our React app` or the `client`.
+
+### Cognito User Pool
+
+- To manage sign up and login functionality for our users, we’ll be using an AWS service called, `Amazon Cognito User Pool`.
+- It’ll store our user’s login info.
+- It’ll also be managing user sessions in our React app.
+
+### Cognito Identity Pool
+
+- To manage access control to our AWS infrastructure we use another service called `Amazon Cognito Identity Pools`.
+
+- This service decides if our previously authenticated user has access to the resources he/she is trying to connect to.
+
+- `Identity Pools` can have different authentication providers (like `Cognito User Pools`, Google, Facebook etc.).
+
+- In our case, our `Identity Pool` will be connected to our `User Pool`.
+
+- If you are a little confused about the differences between a `User Pool` and an `Identity Pool`, don’t worry.
+
+- We’ve got a chapter to help you with just that — Cognito User Pool vs Identity Pool
+
+### Auth Role
+
+- Our `Cognito Identity Pool` has a set of rules (called an `IAM Role`) attached to it.
+
+- It’ll list out the resources an authenticated user is allowed to access.
+
+- These resources are listed using an ID called `ARN`.
+
+- We’ve got a couple of chapters to help you better understand IAMs and ARNs in detail, `What is IAM`, and `What is an ARN`
+
+- But for now our authenticated users use the `Auth Role` in our `Identity Pool` to interact with our resources.
+
+- This will help us ensure that our logged in users can only access our `notes API`.
+
+- And **not any other API in our AWS account.**
+
+### Authentication Flow
+
+- Let’s look at how the above pieces work together in practice.
+
+### Sign up
+
+- A user will sign up for our notes app by creating a new User Pool account.
+
+- They’ll use their `email` and `password`.
+
+- They’ll be sent a code to verify their email.
+
+- This will be handled between our `React app` and `User Pool`.
+
+- No other parts of our infrastructure are involved in this.
+
+### Login
+
+- A signed up user can now login using their email and password.
+
+- Our `React app` will send this info to the `User Pool`.
+
+- If these are valid, then a `session` is created in `React`.
+
+### Authenticated API Requests
+
+To connect to our API.
+
+- The `React` client makes a request to `API Gateway` secured using `IAM Auth`.
+
+- `API Gateway` will check with our `Identity Pool` if the user has authenticated with our `User Pool`.
+
+- It’ll use the `Auth Role` to figure out if this user can access this `API`.
+
+- If everything looks good, then our `Lambda function` is invoked and it’ll pass in an `Identity Pool` `user` `id`.
+
+### S3 File Uploads
+
+- Our `React` client will be directly uploading files to our `S3 bucket`.
+- Similar to our `API`; it’ll also check with the `Identity Pool` to see if we are authenticated with our `User Pool`.
+- And if the `Auth Role` has access to upload files to the `S3 bucket`.
+
+### Alternative Authentication Methods
+
+- It’s worth quickly mentioning that there are other ways to secure your APIs.
+
+- We mentioned above that an `Identity Pool` can use Facebook or Google as an authentication provider.
+
+- So instead of using a `User Pool`, you can use Facebook or Google.
+
+- We have an Extra Credits chapter on Facebook specifically — Facebook Login with Cognito using AWS Amplify
+
+- You can also directly connect the User Pool to API Gateway.
+  The downside with that is that you might not be able to manage access control centrally to the `S3 bucket` (or any other AWS resources in the future).
+
+- Finally, you can manage your `users` and `authentication` yourself. This is a little bit more complicated and we are not covering it in this guide. Though we might expand on it later.
+
+- Now that we’ve got a good idea how we are going to handle `users` and `authentication` in our serverless app, let’s get started by adding the `auth infrastructure` to our app.
+
+---
+
+### Adding Auth to our Serverless App
+
+- So far we’ve created the DynamoDB table, S3 bucket, and API parts of our serverless backend.
+- Now let’s add `auth` into the mix.
+- As we talked about in the previous chapter, we are going to use `Cognito User Pool` to manage user sign ups and logins.
+- While we are going to use `Cognito Identity Pool` to manage which resources our users have access to.
+- Setting this all up can be pretty complicated in `CDK`.
+- `SST` has a simple `Auth` `construct` to help with this.
+
+---
+
+### Create a Stack
+
+- Create a new file `stacks/AuthStack.ts`
+
+- We are creating a new stack for our auth infrastructure.
+- While we don’t need to create a separate stack, we are using it as an example to show how to work with multiple stacks.
+
+- The `Auth construct` creates a `Cognito User Pool` for us.
+- We are using the `login` `prop` to state that we want our users to login with their email.
+
+- The `Auth` construct also creates an `Identity Pool`.
+- The `attachPermissionsForAuthUsers` function allows us to specify the resources our authenticated users have access to.
+
+- This new `AuthStack` references the `bucket` `resource` from the `StorageStack` and the `api` `resource` from the `ApiStack` that we created previously.
+
+- And we want them to access our `S3 bucket`. We’ll look at this in detail below.
+
+- Finally, we output the `id`s of the auth resources that have been created and returning the `auth resource` so that other stacks can access this resource.
+
+```ts
+import { ApiStack } from "./ApiStack";
+import * as iam from "aws-cdk-lib/aws-iam";
+import { StorageStack } from "./StorageStack";
+import { Cognito, StackContext, use } from "sst/constructs";
+
+export function AuthStack({ stack, app }: StackContext) {
+  const { api } = use(ApiStack);
+  const { bucket } = use(StorageStack);
+
+  // Create a Cognito User Pool and Identity Pool
+  const auth = new Cognito(stack, "Auth", {
+    login: ["email"],
+  });
+
+  auth.attachPermissionsForAuthUsers(stack, [
+    // Allow access to the API
+    api,
+    // Policy granting access to a specific folder in the bucket
+    new iam.PolicyStatement({
+      actions: ["s3:*"],
+      effect: iam.Effect.ALLOW,
+      resources: [
+        bucket.bucketArn + "/private/${cognito-identity.amazonaws.com:sub}/*",
+      ],
+    }),
+  ]);
+
+  // Show the auth resources in the output
+  stack.addOutputs({
+    Region: app.region,
+    UserPoolId: auth.userPoolId,
+    UserPoolClientId: auth.userPoolClientId,
+    IdentityPoolId: auth.cognitoIdentityPoolId,
+  });
+
+  // Return the auth resource
+  return {
+    auth,
+  };
+}
+```
+
+### Securing Access to Uploaded Files
+
+- Above we are creating a specific `IAM policy` to secure the files our users will upload to our `S3 bucket`.
+
+```ts
+// Policy granting access to a specific folder in the bucket
+new iam.PolicyStatement({
+  actions: ["s3:*"],
+  effect: iam.Effect.ALLOW,
+  resources: [
+    bucket.bucketArn + "/private/${cognito-identity.amazonaws.com:sub}/*",
+  ],
+}),
+```
+
+- In the above `policy` we are granting our logged in users access to the `path` `private/${cognito-identity.amazonaws.com:sub}/` within our `S3 bucket`’s `ARN`.
+
+- Where `cognito-identity.amazonaws.com:sub` is the authenticated user’s `federated identity id` (their user id).
+
+- So a user has access to **only their folder within the bucket**.
+
+- This allows us to separate access to our user’s file uploads within the same `S3 bucket`.
+
+- One other thing to note is that, the `federated identity id` is a `UUID` that is assigned by our `Identity Pool`.
+
+- **This `id` is different from the one that a user is assigned in a `User Pool`**.
+
+- This is because you can have multiple authentication providers.
+
+- **The `Identity Pool` federates these identities and gives each user a `unique id`.**
+
+---
+
+### Add to the App
+
+- Add the `AuthStack` to our App in `sst.config.ts`
+
+```ts
+import { SSTConfig } from "sst";
+// import { API } from "./stacks/MyStack";
+import { StorageStack } from "./stacks/StorageStack";
+import { ApiStack } from "./stacks/ApiStack";
+import { AuthStack } from "./stacks/AuthStack";
+
+export default {
+  config(_input) {
+    return {
+      name: "notes",
+      region: "eu-west-2",
+    };
+  },
+  stacks(app) {
+    // app.stack(StorageStack);
+    app.stack(StorageStack).stack(ApiStack).stack(AuthStack);
+  },
+} satisfies SSTConfig;
+```
+
+```bash
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  StorageStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+|  ApiStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+|  AuthStack PUBLISH_ASSETS_COMPLETE
+|  AuthStack Auth/UserPool AWS::Cognito::UserPool CREATE_COMPLETE
+|  AuthStack Auth/UserPoolClient AWS::Cognito::UserPoolClient CREATE_COMPLETE
+|  AuthStack Auth AWS::Cognito::IdentityPool CREATE_COMPLETE
+|  AuthStack CustomResourceHandler/ServiceRole AWS::IAM::Role CREATE_COMPLETE
+|  AuthStack Auth/IdentityPoolUnauthRole AWS::IAM::Role CREATE_COMPLETE
+|  AuthStack Auth/IdentityPoolAuthRole AWS::IAM::Role CREATE_COMPLETE
+|  AuthStack CustomResourceHandler AWS::Lambda::Function CREATE_COMPLETE
+|  AuthStack Auth AWS::Cognito::IdentityPoolRoleAttachment CREATE_COMPLETE
+|  AuthStack Auth/IdentityPoolUnauthRole/DefaultPolicy AWS::IAM::Policy CREATE_COMPLETE
+|  AuthStack Auth/IdentityPoolAuthRole/DefaultPolicy AWS::IAM::Policy CREATE_COMPLETE
+|  AuthStack AWS::CloudFormation::Stack CREATE_COMPLETE
+
+✔  Deployed:
+   StorageStack
+   ApiStack
+   ApiEndpoint: https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com
+   AuthStack
+   IdentityPoolId: eu-west-2:~hidden~
+   Region: eu-west-2
+   UserPoolClientId: ~hidden~
+   UserPoolId:  ~hidden~
+```
+
+---
+
+### Add Auth to the API
+
+- We also need to enable authentication in our API
+
+- In `stacks/ApiStack.ts` add the key value pair `authorizer: "iam"` into the `defaults` options.
+
+- **This tells our API that we want to use `AWS_IAM` across all our routes**.
+
+```ts
+// stacks/ApiStack.ts
+import { Api, StackContext, use } from "sst/constructs";
+import { StorageStack } from "./StorageStack";
+
+export function ApiStack({ stack }: StackContext) {
+  const { table } = use(StorageStack);
+
+  // Create the API
+  const api = new Api(stack, "Api", {
+    defaults: {
+      authorizer: "iam", // This tells our API that we want to use AWS_IAM across all our routes
+      function: {
+        bind: [table],
+      },
+    },
+    routes: {
+      "POST /notes": "packages/functions/src/create.main",
+      "GET /notes/{id}": "packages/functions/src/get.main",
+      "GET /notes": "packages/functions/src/list.main",
+      "PUT /notes/{id}": "packages/functions/src/update.main",
+      "DELETE /notes/{id}": "packages/functions/src/delete.main",
+    },
+  });
+
+  stack.addOutputs({
+    ApiEndpoint: api.url,
+  });
+
+  return {
+    api,
+  };
+}
+```
+
+```bash
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack Api/Route_PUT_--notes--{id} AWS::ApiGatewayV2::Route UPDATE_COMPLETE
+|  ApiStack Api/Route_POST_--notes AWS::ApiGatewayV2::Route UPDATE_COMPLETE
+|  ApiStack Api/Route_DELETE_--notes--{id} AWS::ApiGatewayV2::Route UPDATE_COMPLETE
+|  ApiStack Api/Route_GET_--notes--{id} AWS::ApiGatewayV2::Route UPDATE_COMPLETE
+|  ApiStack Api/Route_GET_--notes AWS::ApiGatewayV2::Route UPDATE_COMPLETE
+|  ApiStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+|  AuthStack PUBLISH_ASSETS_COMPLETE
+⠋  Deploying...
+
+✔  Deployed:
+   StorageStack
+   ApiStack
+   ApiEndpoint: https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com
+   AuthStack
+   IdentityPoolId: eu-west-2:~hidden~
+   Region: eu-west-2
+   UserPoolClientId: ~hidden~
+   UserPoolId:  ~hidden~
 ```
 
 ---
