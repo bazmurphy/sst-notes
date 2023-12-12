@@ -1,7 +1,5 @@
 # SST
 
-https://sst.dev/guide.html
-
 ---
 
 ## Anatomy of a Lambda Function
@@ -248,6 +246,60 @@ When we change the `sst.config.ts` and are running `npm run dev` the App updates
 |  StorageStack CustomResourceHandler/ServiceRole AWS::IAM::Role CREATE_COMPLETE
 |  StorageStack CustomResourceHandler AWS::Lambda::Function CREATE_COMPLETE
 |  StorageStack AWS::CloudFormation::Stack CREATE_COMPLETE
+
+✔  Deployed:
+   StorageStack
+```
+
+---
+
+### Create an S3 Bucket in SST
+
+We will create an `S3 Bucket` an add it the `StorageStack` that we created before
+
+- We import `Bucket` from `"sst/constructs"`
+- We instantiate a new bucket with `new Bucket` and add it add it **ABOVE** the `Table`
+- Then in the `StorageStack` `return` we add `bucket`
+- This will allow us to reference the `S3 bucket` in other `stacks`
+
+```ts
+// stacks/StorageStack.ts
+import { StackContext, Bucket, Table } from "sst/constructs"; // import Bucket
+
+export function StorageStack({ stack }: StackContext) {
+  // Create an S3 Bucket
+  const bucket = new Bucket(stack, "Uploads");
+
+  // Create the DynamoDB table
+  const table = new Table(stack, "Notes", {
+    fields: {
+      userId: "string",
+      noteId: "string",
+    },
+    primaryIndex: { partitionKey: "userId", sortKey: "noteId" },
+  });
+
+  return {
+    // return the bucket
+    bucket,
+    table,
+  };
+}
+```
+
+### Deploy the App
+
+We can see when we have updated the `StorageStack` it has deployed the `S3 Bucket`
+
+```bash
+✔  Built
+
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  StorageStack Uploads/Bucket AWS::S3::Bucket CREATE_COMPLETE
+|  StorageStack Uploads/Parameter_bucketName AWS::SSM::Parameter CREATE_COMPLETE
+|  StorageStack Uploads/Bucket/Policy AWS::S3::BucketPolicy CREATE_COMPLETE
+|  StorageStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+⠋  Deploying...
 
 ✔  Deployed:
    StorageStack
