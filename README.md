@@ -363,7 +363,7 @@ export function ApiStack({ stack }: StackContext) {
       },
     },
     routes: {
-      // create a new POST /notes route
+      // create a POST /notes route
       "POST /notes": "packages/functions/src/create.main",
     },
   });
@@ -725,7 +725,7 @@ export function ApiStack({ stack }: StackContext) {
     },
     routes: {
       "POST /notes": "packages/functions/src/create.main",
-      // create a new GET /notes/{id} route
+      // create a GET /notes/{id} route
       "GET /notes/{id}": "packages/functions/src/get.main",
     },
   });
@@ -830,7 +830,7 @@ export function ApiStack({ stack }: StackContext) {
     routes: {
       "POST /notes": "packages/functions/src/create.main",
       "GET /notes/{id}": "packages/functions/src/get.main",
-      // create a new GET /notes route (to get all notes)
+      // create a GET /notes route (to get all notes)
       "GET /notes": "packages/functions/src/list.main",
     },
   });
@@ -859,6 +859,118 @@ curl https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes
 |  Invoked packages/functions/src/list.main
 |  Built packages/functions/src/list.main
 |  Done in 1887ms
+```
+
+---
+
+### Add an API to Update a Note
+
+- Create an API that allows a user to update a `note` with a new `note object` given the `id`
+
+## Add the Function
+
+- Create a new file `packages/functions/src/update.ts`
+- This should look similar to the `create.ts` function combined.
+- Here we make an `update` DynamoDB call with the new `content` and `attachment` values in the `params`.
+
+```ts
+import { Table } from "sst/node/table";
+import handler from "@notes/core/handler";
+import dynamoDb from "@notes/core/dynamodb";
+
+export const main = handler(async (event) => {
+  const data = JSON.parse(event.body || "{}");
+
+  const params = {
+    TableName: Table.Notes.tableName,
+    Key: {
+      // The attributes of the item to be created
+      userId: "123", // The id of the author
+      noteId: event?.pathParameters?.id, // The id of the note from the path
+    },
+    // 'UpdateExpression' defines the attributes to be updated
+    // 'ExpressionAttributeValues' defines the value in the update expression
+    UpdateExpression: "SET content = :content, attachment = :attachment",
+    ExpressionAttributeValues: {
+      ":attachment": data.attachment || null,
+      ":content": data.content || null,
+    },
+    // 'ReturnValues' specifies if and how to return the item's attributes,
+    // where ALL_NEW returns all attributes of the item after the update; you
+    // can inspect 'result' below to see how it works with different settings
+    ReturnValues: "ALL_NEW",
+  };
+
+  await dynamoDb.update(params);
+
+  return JSON.stringify({ status: true });
+});
+```
+
+### Add the Route
+
+- In `stacks/ApiStack.ts` we add to the `routes` object a key/value pair `"GET /notes": "packages/functions/src/list.main",`
+
+```ts
+import { Api, StackContext, use } from "sst/constructs";
+import { StorageStack } from "./StorageStack";
+
+export function ApiStack({ stack }: StackContext) {
+  const { table } = use(StorageStack);
+
+  // Create the API
+  const api = new Api(stack, "Api", {
+    defaults: {
+      function: {
+        bind: [table],
+      },
+    },
+    routes: {
+      "POST /notes": "packages/functions/src/create.main",
+      "GET /notes/{id}": "packages/functions/src/get.main",
+      "GET /notes": "packages/functions/src/list.main",
+      // create a PUT /notes/{id} route (to update a single note by id)
+      "PUT /notes/{id}": "packages/functions/src/update.main",
+    },
+  });
+
+  stack.addOutputs({
+    ApiEndpoint: api.url,
+  });
+
+  return {
+    api,
+  };
+}
+```
+
+### Test the API
+
+```bash
+curl -X PUT \
+-H 'Content-Type: application/json' \
+-d '{"content":"New World","attachment":"new.jpg"}' \
+https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes/fff7b2d0-990a-11ee-b964-a919c44c56a1
+
+{"status":true}
+```
+
+```bash
+✔  Built with no changes
+|  Invoked packages/functions/src/list.main
+|  Done in 82ms
+|  Invoked packages/functions/src/update.main
+|  Built packages/functions/src/update.main
+|  +1691ms result: {
+|  +1691ms   Attributes: {
+|  +1691ms     attachment: 'new.jpg',
+|  +1691ms     content: 'New World',
+|  +1692ms     createdAt: 1702398301821,
+|  +1692ms     noteId: 'fff7b2d0-990a-11ee-b964-a919c44c56a1',
+|  +1692ms     userId: '123'
+|  +1692ms   }
+|  +1692ms }
+|  Done in 1698ms
 ```
 
 ---
