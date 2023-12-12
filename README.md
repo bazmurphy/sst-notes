@@ -23,6 +23,7 @@ https://sst.dev/guide.html
 in `sst.config.ts` change region to `eu-west-2`
 
 ```ts
+// sst.config.ts
 import { SSTConfig } from "sst";
 import { API } from "./stacks/MyStack";
 
@@ -67,7 +68,6 @@ We are creating a simple API with one route, GET /. When this API is invoked, th
 
 ```ts
 // stacks/MyStack.ts
-
 import { StackContext, Api, EventBus } from "sst/constructs";
 
 export function API({ stack }: StackContext) {
@@ -82,7 +82,9 @@ export function API({ stack }: StackContext) {
 }
 ```
 
-## Starting the dev environment
+---
+
+## Starting the `dev` environment
 
 `npm run dev`
 
@@ -126,7 +128,7 @@ Live API on AWS:
 
 ---
 
-### Deploy to Production
+### Deploy to `prod`
 
 To deploy our API to production, we’ll need to stop our local development environment and run the following.
 
@@ -135,5 +137,120 @@ To deploy our API to production, we’ll need to stop our local development envi
 We don’t have to do this right now. We’ll be doing it later once we are done working on our app.
 
 The idea here is that we are able to work on separate environments. So when we are working in our personal environment `Baz`), it doesn’t break the API for our users in `prod`. The environment (or `stage`) names in this case are just strings and have no special significance. We could’ve called them `development` and `production` instead. We are however creating completely new serverless apps when we deploy to a different environment. This is another advantage of the serverless architecture. The infrastructure as code idea means that it’s easy to replicate to new environments. And the pay per use model means that we are not charged for these new environments unless we actually use them.
+
+---
+
+### Create a DynamoDB Table in SST
+
+We are now going to start creating our infrastructure in SST using AWS CDK. Starting with DynamoDB.
+
+#### Create a Stack
+
+Add a new file in `stacks/StorageStack.ts`
+
+```ts
+// stacks/StorageStack.ts
+import { StackContext, Table } from "sst/constructs";
+
+export function StorageStack({ stack }: StackContext) {
+  // Create the DynamoDB table
+  const table = new Table(stack, "Notes", {
+    fields: {
+      userId: "string",
+      noteId: "string",
+    },
+    primaryIndex: { partitionKey: "userId", sortKey: "noteId" },
+  });
+
+  return {
+    table,
+  };
+}
+```
+
+We are creating a new `stack` in our SST app.
+We will be using it to create all our storage related infrastructure (DynamoDB and S3).
+There’s no specific reason why we are creating a separate `stack` for these resources.
+It’s only meant as a way of organizing our resources and **illustrating how to create separate stacks in our app**.
+
+We are using SST’s Table construct to create our `DynamoDB` table.
+
+It has two `fields`:
+
+- `userId`: The id of the user that the note belongs to.
+- `noteId`: The id of the note.
+
+We are then creating an index for our table.
+
+- Each `DynamoDB` table has a `primary key`.
+- **`This cannot be changed once set`**.
+- **`The primary key uniquely identifies each item in the table, so that no two items can have the same key.`**
+
+- DynamoDB supports two different kinds of primary keys:
+  - `Partition key`
+  - `Partition key and sort key (composite)`
+
+We are going to use the `composite primary key` (referenced by `primaryIndex` in code block above) which gives us additional flexibility when querying the data.
+
+For example, if you provide only the `value` for `userId`, DynamoDB would retrieve **all of the notes by that user**.
+
+Or you could provide a `value` for `userId` and a `value` for `noteId`, to retrieve a particular note.
+
+We are also returning the Table that’s being created publicly.
+
+```ts
+return {
+  table,
+};
+```
+
+**By explicitly returning the resources created in a stack, we can reference them in other stacks when we imported.**
+
+---
+
+### Remove Template Files
+
+In `sst.config.ts` we can remove the previous `API` stack
+
+And `import` and use the `StorageStack` we just created
+
+```ts
+// sst.config.ts
+import { SSTConfig } from "sst";
+// import { API } from "./stacks/MyStack";
+import { StorageStack } from "./stacks/StorageStack";
+
+export default {
+  config(_input) {
+    return {
+      name: "notes",
+      region: "eu-west-2",
+    };
+  },
+  stacks(app) {
+    app.stack(StorageStack);
+  },
+} satisfies SSTConfig;
+```
+
+---
+
+### Deploy the App
+
+When we change the `sst.config.ts` and are running `npm run dev` the App updates
+
+```bash
+✔  Built
+
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  StorageStack Notes/Table AWS::DynamoDB::Table CREATE_COMPLETE
+|  StorageStack Notes/Parameter_tableName AWS::SSM::Parameter CREATE_COMPLETE
+|  StorageStack CustomResourceHandler/ServiceRole AWS::IAM::Role CREATE_COMPLETE
+|  StorageStack CustomResourceHandler AWS::Lambda::Function CREATE_COMPLETE
+|  StorageStack AWS::CloudFormation::Stack CREATE_COMPLETE
+
+✔  Deployed:
+   StorageStack
+```
 
 ---
