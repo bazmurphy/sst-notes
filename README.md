@@ -664,3 +664,109 @@ export default function handler(
 - `npm install --save-dev @types/aws-lambda`
 
 ---
+
+### Add an API to Get a Note
+
+- Now that we created a note and saved it to our database, let’s add an API to retrieve a note given its id.
+
+### Add the Function
+
+- Create `packages/functions/src/get.ts`
+
+- This follows exactly the same structure as our previous `create.ts`` function.
+- The major difference here is that we are doing a `dynamoDb.get(params)` to get a `note object` given the `userId` (still hardcoded) and `noteId` that’s passed in through the request.
+
+```ts
+// packages/functions/src/get.ts
+import { Table } from "sst/node/table";
+import handler from "@notes/core/handler";
+import dynamoDb from "@notes/core/dynamodb";
+
+export const main = handler(async (event) => {
+  const params = {
+    TableName: Table.Notes.tableName,
+    // 'Key' defines the partition key and sort key of
+    // the item to be retrieved
+    Key: {
+      userId: "123", // The id of the author
+      noteId: event?.pathParameters?.id, // The id of the note from the path
+    },
+  };
+
+  const result = await dynamoDb.get(params);
+  if (!result.Item) {
+    throw new Error("Item not found.");
+  }
+
+  // Return the retrieved item
+  return JSON.stringify(result.Item);
+});
+```
+
+---
+
+### Add the Route
+
+- In `stacks/ApiStack.ts` we add to the `routes` object a key/value pair `"GET /notes/{id}": "packages/functions/src/get.main"`
+
+```ts
+// stacks/ApiStack.ts
+import { Api, StackContext, use } from "sst/constructs";
+import { StorageStack } from "./StorageStack";
+
+export function ApiStack({ stack }: StackContext) {
+  const { table } = use(StorageStack);
+
+  const api = new Api(stack, "Api", {
+    defaults: {
+      function: {
+        bind: [table],
+      },
+    },
+    routes: {
+      "POST /notes": "packages/functions/src/create.main",
+      // create a new GET /notes/{id} route
+      "GET /notes/{id}": "packages/functions/src/get.main",
+    },
+  });
+
+  stack.addOutputs({
+    ApiEndpoint: api.url,
+  });
+
+  return {
+    api,
+  };
+}
+```
+
+```bash
+✔  Built
+
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack Api/Lambda_GET_--notes--{id}/ServiceRole AWS::IAM::Role CREATE_COMPLETE
+|  ApiStack Api/Lambda_GET_--notes--{id}/ServiceRole/DefaultPolicy AWS::IAM::Policy CREATE_COMPLETE
+
+|  ApiStack Api/Lambda_GET_--notes--{id} AWS::Lambda::Function CREATE_COMPLETE
+|  ApiStack Api/Route_GET_--notes--{id}/Integration_GET_--notes--{id} AWS::ApiGatewayV2::Integration CREATE_COMPLETE
+|  ApiStack Api/Lambda_GET_--notes--{id}/EventInvokeConfig AWS::Lambda::EventInvokeConfig CREATE_COMPLETE
+|  ApiStack Api/Route_GET_--notes--{id} AWS::Lambda::Permission CREATE_COMPLETE
+|  ApiStack Api/Route_GET_--notes--{id} AWS::ApiGatewayV2::Route CREATE_COMPLETE
+|  ApiStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+
+✔  Deployed:
+   StorageStack
+   ApiStack
+   ApiEndpoint: https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com
+```
+
+### Test the API
+
+```bash
+curl https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com/notes/f1c46410-9905-11ee-b0a5-1d3f34358d8e
+
+{"attachment":"hello.jpg","content":"Hello World","createdAt":1702396130513,"noteId":"f1c46410-9905-11ee-b0a5-1d3f34358d8e","userId":"123"}
+```
+
+---

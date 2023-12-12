@@ -14,6 +14,8 @@ export function ApiStack({ stack }: StackContext) {
     routes: {
       // create a new POST /notes route
       "POST /notes": "packages/functions/src/create.main",
+      // create a new GET /notes/{id} route
+      "GET /notes/{id}": "packages/functions/src/get.main",
     },
   });
 
