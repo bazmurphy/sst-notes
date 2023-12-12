@@ -306,3 +306,29 @@ We can see when we have updated the `StorageStack` it has deployed the `S3 Bucke
 ```
 
 ---
+
+### Review
+
+1. What we initially created `Hello World Public API`
+
+- `API Gateway` handles our main `/` endpoint
+- sending `GET` requests made to this to our default `services/functions/lambda.js` Lambda function
+
+![](readme-images/serverless-hello-world-api-architecture.png)
+
+2. Our `Notes App Architecture` currently
+   - with DynamoDB
+   - with S3
+
+- Our database is not exposed publicly and is only invoked by our Lambda functions
+- But our users will be uploading files directly to the S3 bucket that we created
+
+![](readme-images/serverless-public-api-architecture.png)
+
+- **The second point is something that is different from a lot of traditional server based architectures.**
+- We are typically used to uploading the files to our server and then moving them to a file server.
+- But here we will be directly uploading it to our S3 bucket. We will look at this in more detail when we look at file uploads.
+- In the coming sections will also be looking at how we can secure access to these resources.
+- We will be setting it up such that only our authenticated users will be allowed to access these resources.
+
+---
