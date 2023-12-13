@@ -1665,13 +1665,90 @@ Making API request
   status: 200,
   statusText: 'OK',
   data: {
-    userId: 'eu-west-2:d6f58181-421d-4311-9b23-8240afa87442',
-    noteId: '60e18fb0-99cb-11ee-a050-337a1ae33dfb',
+    userId: 'eu-west-2:d6f58181-****-****-****-************',
+    noteId: '60e18fb0-****-****-****-************',
     content: 'hello world',
     attachment: 'hello.jpg',
     createdAt: 1702480927787
   }
 }
 ```
+
+---
+
+### Handling Secrets in SST
+
+- We created a Stripe account and got a pair of keys.
+- Including the Stripe secret key.
+- We need this in our app but we do not want to store this secret in our code.
+- In this chapter, we’ll look at how to add `secrets` in SST.
+
+- We will be using the `SST CLI` to store secrets in the `AWS SSM Parameter Store`.
+
+- Run the following in your project root:
+
+```sh
+npx sst secrets set STRIPE_SECRET_KEY <YOUR STRIPE SECRET TEST KEY>
+```
+
+```sh
+$ npx sst secrets set STRIPE_SECRET_KEY sk_test_****************************
+✔  Setting "STRIPE_SECRET_KEY
+```
+
+- You can specify the `stage` for a `secret`. **By default, the stage is your local stage.**
+
+- You can run `npx sst secrets list` to see the secrets for the current stage.
+
+```sh
+$ npx sst secrets list
+┌───────────────────┬───────────────────────────────────────────────────────────────────────┐
+│ Secrets           │ Values                                                                │
+├───────────────────┼───────────────────────────────────────────────────────────────────────┤
+│ STRIPE_SECRET_KEY │ sk_test_*********************************************                 │
+└───────────────────┴───────────────────────────────────────────────────────────────────────┘
+```
+
+- Now that the secret is stored in `AWS Parameter Store`, we can add it into our stack using the `Config` construct.
+
+- Add the following below the `use(StorageStack)` line in `stacks/ApiStack.ts`
+
+```ts
+const STRIPE_SECRET_KEY = new Config.Secret(stack, "STRIPE_SECRET_KEY");
+```
+
+- Import `Config` in `stacks/ApiStack.js`. Replace the following.
+
+```ts
+import { Api, StackContext, use } from "sst/constructs";
+```
+
+- With:
+
+```ts
+import { Api, Config, StackContext, use } from "sst/constructs";
+```
+
+- Next, `bind` `STRIPE_SECRET_KEY` to the API in `stacks/ApiStack.ts`.
+
+- Replace this:
+
+```ts
+function: {
+bind: [table],
+},
+```
+
+- With:
+
+```ts
+function: {
+bind: [table, STRIPE_SECRET_KEY],
+},
+```
+
+- This will add `STRIPE_SECRET_KEY` as a secret in the stack. And allow our API to access the `secret`.
+
+- Now we are ready to add an API to handle billing.
 
 ---
