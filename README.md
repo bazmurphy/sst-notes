@@ -1451,9 +1451,7 @@ export default {
 
 - We also need to enable authentication in our API
 
-- In `stacks/ApiStack.ts` add the key value pair `authorizer: "iam"` into the `defaults` options.
-
-- **This tells our API that we want to use `AWS_IAM` across all our routes**.
+- In `stacks/ApiStack.ts` add the key value pair `authorizer: "iam"` into the `defaults` options. **This tells our API that we want to use `AWS_IAM` across all our routes**.
 
 ```ts
 // stacks/ApiStack.ts
@@ -1466,7 +1464,8 @@ export function ApiStack({ stack }: StackContext) {
   // Create the API
   const api = new Api(stack, "Api", {
     defaults: {
-      authorizer: "iam", // This tells our API that we want to use AWS_IAM across all our routes
+      // This tells our API that we want to use AWS_IAM across all our routes
+      authorizer: "iam",
       function: {
         bind: [table],
       },
@@ -1490,6 +1489,8 @@ export function ApiStack({ stack }: StackContext) {
 }
 ```
 
+### Deploy Changes
+
 ```bash
 |  StorageStack PUBLISH_ASSETS_COMPLETE
 |  ApiStack PUBLISH_ASSETS_COMPLETE
@@ -1511,6 +1512,166 @@ export function ApiStack({ stack }: StackContext) {
    Region: eu-west-2
    UserPoolClientId: ~hidden~
    UserPoolId:  ~hidden~
+```
+
+### Create a Test User
+
+- Use `AWS CLI` to sign up a user with their email and password
+
+- Make sure to replace `COGNITO_REGION` and `USER_POOL_CLIENT_ID` with the `Region` and `UserPoolClientId` from above.
+
+```bash
+aws cognito-idp sign-up \
+  --region <COGNITO_REGION (^Region from above)> \
+  --client-id <USER_POOL_CLIENT_ID (^UserPoolClientID from above)> \
+  --username <SOME_EMAIL> \
+  --password <SOME_PASSWORD>
+```
+
+```bash
+aws cognito-idp sign-up \
+  --region eu-west-2 \
+  --client-id ~hidden~ \
+  --username ~hidden~ \
+  --password ~hidden~
+
+{
+    "UserConfirmed": false,
+    "CodeDeliveryDetails": {
+        "Destination": "~hidden~@****",
+        "DeliveryMedium": "EMAIL",
+        "AttributeName": "email"
+    },
+    "UserSub": "~hidden~"
+}
+```
+
+---
+
+### Secure Our Serverless APIs
+
+- Now that the auth infrastructure and a test user has been created, let’s use them to secure our APIs and test them.
+
+- Now that our APIs have been secured with Cognito User Pool and Identity Pool, we are ready to use the authenticated user’s info in our Lambda functions.
+
+- Recall that we’ve been hard coding our user ids so far (with user id 123). We’ll need to grab the real user id from the Lambda function event.
+
+### Cognito Identity Id
+
+- Recall the function signature of a Lambda function:
+
+```ts
+export async function main(event: APIGatewayProxyEvent, context: Context) {}
+```
+
+- Or the refactored version that we are using:
+
+```ts
+export const main = handler(async (event) => {});
+```
+
+- So far we’ve used the event object to get the path parameters (`event.pathParameters`) and request body (`event.body`).
+
+- Now we’ll get the `id` of the authenticated user.
+
+- This is an id that’s assigned to our user by our Cognito Identity Pool.
+
+```ts
+event.requestContext.authorizer?.iam.cognitoIdentity.identityId;
+```
+
+- You’ll also recall that so far all of our APIs are hard coded to interact with a single user. Let's change that
+
+```ts
+userId: "123", // The id of the author
+```
+
+- Replace the above line in
+
+  - `packages/functions/src/create.ts`
+  - `packages/functions/src/get.ts`
+  - `packages/functions/src/update.ts`
+  - `packages/functions/src/delete.ts`
+
+- with:
+
+```ts
+userId: event.requestContext.authorizer?.iam.cognitoIdentity.identityId,
+```
+
+- Keep in mind that the `userId` above is the `Federated Identity id` (or `Identity Pool user id`). This is not the `user id` that is assigned in our `User Pool`. If you want to use the user’s `User Pool user Id` instead, have a look at the [Mapping Cognito Identity Id and User Pool Id chapter](https://sst.dev/archives/mapping-cognito-identity-id-and-user-pool-id.html).
+
+- To test these changes we cannot use the curl command anymore.
+
+- We’ll need to generate a set of authentication headers to make our requests.
+
+### Test the APIs
+
+- Let’s quickly test our APIs with authentication.
+
+- To be able to hit our API endpoints securely, we need to follow these steps.
+
+  - Authenticate against our `User Pool` and acquire a `user token`.
+  - With the `user token` get `temporary IAM credentials` from our `Identity Pool`.
+  - Use the `IAM credentials` to **sign our API request** with `Signature Version 4`.
+
+- These steps can be a bit tricky to do by hand. So we created a simple tool called AWS API Gateway Test CLI.
+
+- We need to pass in quite a bit of our info to complete the above steps.
+
+- Use the username and password of the user created above.
+
+- Replace USER_POOL_ID, USER_POOL_CLIENT_ID, COGNITO_REGION, and IDENTITY_POOL_ID with the `UserPoolId`, `UserPoolClientId`, `Region`, and `IdentityPoolId` from our previous chapter.
+
+- Replace the API_ENDPOINT with the `ApiEndpoint` from our API stack outputs.
+
+- And for the API_REGION you can use the same `Region` as we used above. Since our entire app is deployed to the same region.
+
+- While this might look intimidating, just keep in mind that behind the scenes **all we are doing is generating some security headers before making a basic HTTP request.**
+
+- We won’t need to do this when we connect from our React app.
+
+- ⚠️ To manually "confirm" the User (when we have no frontend) go to `Amazon Cognito`, to `User Pools`, to `Baz-notes-Auth`, click on the User, `Actions`, `Confirm Account`
+
+#### Request
+
+```bash
+npx aws-api-gateway-cli-test \
+--user-pool-id='<USER_POOL_ID>' \
+--app-client-id='<USER_POOL_CLIENT_ID>' \
+--cognito-region='<COGNITO_REGION>' \
+--identity-pool-id='<IDENTITY_POOL_ID>' \
+--invoke-url='<API_ENDPOINT>' \
+--api-gateway-region='<API_REGION>' \
+--username='~hidden~' \
+--password='~hidden~' \
+--path-template='/notes' \
+--method='POST' \
+--body='{"content":"hello world","attachment":"hello.jpg"}'
+```
+
+- Windows (syntax):
+
+```bash
+npx aws-api-gateway-cli-test --user-pool-id=****** --app-client-id=****** --cognito-region=eu-west-2 --identity-pool-id=****** --invoke-url=https://uxh91gk4ta.execute-api.eu-west-2.amazonaws.com --api-gateway-region=eu-west-2 --username=****** --password=****** --path-template=/notes --method=POST --body="{\"content\":\"hello world\",\"attachment\":\"hello.jpg\"}"
+```
+
+#### Response
+
+```bash
+Getting temporary credentials
+Making API request
+{
+  status: 200,
+  statusText: 'OK',
+  data: {
+    userId: 'eu-west-2:d6f58181-421d-4311-9b23-8240afa87442',
+    noteId: '60e18fb0-99cb-11ee-a050-337a1ae33dfb',
+    content: 'hello world',
+    attachment: 'hello.jpg',
+    createdAt: 1702480927787
+  }
+}
 ```
 
 ---
