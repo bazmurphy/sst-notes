@@ -24,6 +24,8 @@ export function ApiStack({ stack }: StackContext) {
       "PUT /notes/{id}": "packages/functions/src/update.main",
       // create a DELETE /notes/{id} route (to delete a single note by id)
       "DELETE /notes/{id}": "packages/functions/src/delete.main",
+      // create a POST /billing route
+      "POST /billing": "packages/functions/src/billing.main",
     },
   });
 

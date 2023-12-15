@@ -1752,3 +1752,160 @@ bind: [table, STRIPE_SECRET_KEY],
 - Now we are ready to add an API to handle billing.
 
 ---
+
+### Add a Billing Lambda
+
+- Now let’s get started with creating an API to handle billing. It’s going to take a Stripe token and the number of notes the user wants to store.
+
+- Start by installing the Stripe npm package.
+
+  - `npm install --save stripe`
+
+- Create `packages/functions/src/billing.ts`
+
+- We get the `storage` and `source` from the `request body`. The `storage` variable is the number of notes the user would like to store in his account. And `source` is the `Stripe token` for the card that we are going to charge.
+
+- We are using a `calculateCost(storage)` function (that we are going to add soon) to figure out how much to charge a user based on the number of notes that are going to be stored.
+
+- We create a new Stripe object using our Stripe Secret key. We are getting this from the environment variable that we configured in the previous chapter. We are using apiVersion 2023-10-16 but you can check the Stripe documentation for the latest version.
+
+- Finally, we use the `stripe.charges.create` method to charge the user and respond to the request if everything went through successfully.
+
+```ts
+import Stripe from "stripe";
+import { Config } from "sst/node/config";
+import handler from "@notes/core/handler";
+import { calculateCost } from "@notes/core/cost";
+
+export const main = handler(async (event) => {
+  const { storage, source } = JSON.parse(event.body || "{}");
+  const amount = calculateCost(storage);
+  const description = "Scratch charge";
+
+  // Load our secret key
+  const stripe = new Stripe(Config.STRIPE_SECRET_KEY, {
+    apiVersion: "2023-10-16",
+  });
+
+  await stripe.charges.create({
+    source,
+    amount,
+    description,
+    currency: "usd",
+  });
+
+  return JSON.stringify({ status: true });
+});
+```
+
+### Add the Business Logic
+
+- Create `packages/core/src/cost.ts`
+
+- This is basically saying that if a user wants to store 10 or fewer notes, we’ll charge them $4 per note. For 11 to 100 notes, we’ll charge $2 and any more than 100 is $1 per note. Since Stripe expects us to provide the amount in pennies (the currency’s smallest unit) we multiply the result by 100.
+
+```ts
+export function calculateCost(storage: number) {
+  const rate = storage <= 10 ? 4 : storage <= 100 ? 2 : 1;
+  return rate * storage * 100;
+}
+```
+
+### Add the Route
+
+- Add the route in `stacks/ApiStack.ts`
+
+```ts
+import { Api, Config, StackContext, use } from "sst/constructs";
+import { StorageStack } from "./StorageStack";
+
+export function ApiStack({ stack }: StackContext) {
+  const { table } = use(StorageStack);
+  const STRIPE_SECRET_KEY = new Config.Secret(stack, "STRIPE_SECRET_KEY");
+
+  const api = new Api(stack, "Api", {
+    defaults: {
+      authorizer: "iam",
+      function: {
+        bind: [table, STRIPE_SECRET_KEY],
+      },
+    },
+    routes: {
+      "POST /notes": "packages/functions/src/create.main",
+      "GET /notes/{id}": "packages/functions/src/get.main",
+      "GET /notes": "packages/functions/src/list.main",
+      "PUT /notes/{id}": "packages/functions/src/update.main",
+      "DELETE /notes/{id}": "packages/functions/src/delete.main",
+      // create a POST /billing route
+      "POST /billing": "packages/functions/src/billing.main",
+    },
+  });
+
+  stack.addOutputs({
+    ApiEndpoint: api.url,
+  });
+
+  return {
+    api,
+  };
+}
+```
+
+### Deploy our Changes
+
+```sh
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack PUBLISH_ASSETS_COMPLETE
+|  ApiStack Api/Lambda_POST_--billing/ServiceRole AWS::IAM::Role CREATE_COMPLETE
+|  ApiStack Api/Lambda_POST_--billing/ServiceRole/DefaultPolicy AWS::IAM::Policy CREATE_COMPLETE
+|  ApiStack Api/Lambda_POST_--billing AWS::Lambda::Function CREATE_COMPLETE
+|  ApiStack Api/Route_POST_--billing/Integration_POST_--billing AWS::ApiGatewayV2::Integration CREATE_COMPLETE
+|  ApiStack Api/Route_POST_--billing AWS::Lambda::Permission CREATE_COMPLETE
+|  ApiStack Api/Lambda_POST_--billing/EventInvokeConfig AWS::Lambda::EventInvokeConfig CREATE_COMPLETE
+|  ApiStack Api/Route_POST_--billing AWS::ApiGatewayV2::Route CREATE_COMPLETE
+|  ApiStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+|  AuthStack PUBLISH_ASSETS_COMPLETE
+
+✔  Deployed:
+   StorageStack
+   ApiStack
+   ApiEndpoint: https://**********.execute-api.eu-west-2.amazonaws.com
+   AuthStack
+   IdentityPoolId: ~hidden~
+   Region: eu-west-2
+   UserPoolClientId: ~hidden~
+   UserPoolId: ~hidden~
+```
+
+### Test the Billing API
+
+- Test with a Stripe test token called tok_visa and with 21 as the number of notes we want to store.
+- You can read more about the Stripe test cards and tokens in the Stripe API Docs https://stripe.com/docs/testing#cards
+
+```sh
+npx aws-api-gateway-cli-test \
+--username='hidden' \
+--password='hidden' \
+--user-pool-id='<USER_POOL_ID>' \
+--app-client-id='<USER_POOL_CLIENT_ID>' \
+--cognito-region='<COGNITO_REGION>' \
+--identity-pool-id='<IDENTITY_POOL_ID>' \
+--invoke-url='<API_ENDPOINT>' \
+--api-gateway-region='<API_REGION>' \
+--path-template='/billing' \
+--method='POST' \
+--body='{"source":"tok_visa","storage":21}'
+```
+
+```sh
+npx aws-api-gateway-cli-test --username=hidden --password=hidden --user-pool-id=hidden --app-client-id=hidden --cognito-region=eu-west-2 --identity-pool-id=hidden --invoke-url=https://**********.execute-api.eu-west-2.amazonaws.com --api-gateway-region=eu-west-2 --path-template=/billing --method=POST --body="{\"source\":\"tok_visa\",\"storage\":\"21\"}"
+```
+
+- Successful response:
+
+```sh
+Authenticating with User Pool
+Getting temporary credentials
+Making API request
+{ status: 200, statusText: 'OK', data: { status: true } }
+```
