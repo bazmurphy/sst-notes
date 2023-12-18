@@ -1909,3 +1909,175 @@ Getting temporary credentials
 Making API request
 { status: 200, statusText: 'OK', data: { status: true } }
 ```
+
+---
+
+### Handle CORS in Serverless Apps
+
+- We have a serverless API backend that allows users to create notes and an S3 bucket where they can upload files.
+- We are now almost ready to work on our frontend React app.
+
+- However, before we can do that. There is one thing that needs to be taken care of — CORS or Cross-Origin Resource Sharing.
+
+- Since our React app is going to be run inside a browser (and most likely hosted on a domain separate from our serverless API and S3 bucket), we need to configure CORS to allow it to connect to our resources.
+
+- Let’s quickly review our backend app architecture.
+
+- Our client will be interacting with our API, S3 bucket, and User Pool.
+- CORS in the User Pool part is taken care of by its internals.
+- That leaves our API and S3 bucket. In the next couple of chapters we’ll be setting that up.
+
+Let’s get a quick background on CORS.
+
+![Serverless Auth API Architecture](/readme-images/serverless-auth-api-architecture.png)
+
+### Understanding CORS
+
+- There are two things we need to do to support CORS in our serverless API.
+
+  1. Preflight OPTIONS requests
+
+  For certain types of cross-domain requests (`PUT`, `DELETE`, ones with `Authentication` headers, etc.), your browser will first make a `preflight request` using the `request` method `OPTIONS`. These need to respond with the `domains that are allowed` to access this `API` and the `HTTP` methods that are allowed.
+
+  2. Respond with CORS headers
+
+  For all the other types of `requests` we need to make sure to include the `appropriate CORS headers`. These `headers`, just like the one above, need to include the `domains that are allowed`.
+
+- There’s a bit more to CORS than what we have covered here. So make sure to check out the [Wikipedia](https://en.wikipedia.org/wiki/Cross-origin_resource_sharing) article for further details.
+
+- If we don’t set the above up, then we’ll see something like this in our HTTP responses.
+
+  - `No 'Access-Control-Allow-Origin' header is present on the requested resource`
+
+- And our browser won’t show us the HTTP response. This can make debugging our API extremely hard.
+
+### Cors in API Gateway
+
+- The SST `Api` `construct` that we are using `enables CORS by default`.
+
+```ts
+new Api(this, "Api", {
+  // Enabled by default
+  cors: true,
+  routes: {
+    "GET /notes": "functions/list.main",
+  },
+});
+```
+
+- You can `further configure` the specifics if necessary. You can read more about this https://docs.sst.dev/constructs/Api#cors.
+
+```ts
+new Api(this, "Api", {
+  cors: {
+    allowMethods: ["get"],
+  },
+  routes: {
+    "GET /notes": "functions/list.main",
+  },
+});
+```
+
+- We’ll go with the `default` setting for now.
+
+### CORS Headers in Lambda Functions
+
+- We need to add the `CORS` `headers` in our Lambda function `response`
+- Replace the `return` statement in `packages/core/src/handler.ts`
+
+- Again you can `customize` the `CORS headers` but we’ll go with the `default` ones here.
+
+- The two steps we’ve taken above ensure that if our `Lambda functions` are invoked through `API Gateway`, it’ll `respond` with the `proper CORS config`.
+
+```ts
+import { Context, APIGatewayProxyEvent } from "aws-lambda";
+
+export default function handler(
+  lambda: (evt: APIGatewayProxyEvent, context: Context) => Promise<string>
+) {
+  return async function (event: APIGatewayProxyEvent, context: Context) {
+    let body, statusCode;
+
+    try {
+      body = await lambda(event, context);
+      statusCode = 200;
+    } catch (error) {
+      console.log(error);
+      statusCode = 500;
+      body = JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return {
+      body,
+      statusCode,
+      // Configure CORS in the Headers
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+      },
+    };
+  };
+}
+```
+
+- Next, let’s add these `CORS settings` to our S3 bucket as well. Since our frontend React app will be uploading files directly to it.
+
+---
+
+### Handle CORS in S3 for File Uploads
+
+- In the notes app we are building, users will be uploading files to the bucket we just created.
+- And since our app will be served through our custom domain, it’ll be communicating `across domains while it does the uploads`.
+- `By default, S3 does not allow its resources to be accessed from a different domain`.
+- However, `cross-origin resource sharing (CORS)` defines a way for client web applications that are loaded in one domain to interact with resources in a different domain.
+
+- Let’s `enable` `CORS` for our `S3 bucket`.
+
+- Add `CORS` rules to the bucket in `stacksStorageStack.ts`
+
+- Note that, you can customize this configuration to use `your own domain` or a list of domains. We’ll use these `default settings` for now.
+
+```ts
+import { StackContext, Bucket, Table } from "sst/constructs";
+
+export function StorageStack({ stack }: StackContext) {
+  const bucket = new Bucket(stack, "Uploads", {
+    // Add CORS rules to the Bucket
+    cors: [
+      {
+        maxAge: "1 day",
+        allowedOrigins: ["*"],
+        allowedHeaders: ["*"],
+        allowedMethods: ["GET", "PUT", "POST", "DELETE", "HEAD"],
+      },
+    ],
+  });
+
+  const table = new Table(stack, "Notes", {
+    fields: {
+      userId: "string",
+      noteId: "string",
+    },
+    primaryIndex: { partitionKey: "userId", sortKey: "noteId" },
+  });
+
+  return {
+    bucket,
+    table,
+  };
+}
+```
+
+```sh
+|  StorageStack PUBLISH_ASSETS_COMPLETE
+|  StorageStack Uploads/Bucket AWS::S3::Bucket UPDATE_COMPLETE
+|  StorageStack AWS::CloudFormation::Stack UPDATE_COMPLETE
+|  ApiStack PUBLISH_ASSETS_COMPLETE
+|  AuthStack PUBLISH_ASSETS_COMPLETE
+⠋  Deploying...
+✔  Deployed:
+```
+
+---

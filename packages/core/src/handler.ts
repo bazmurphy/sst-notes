@@ -22,6 +22,11 @@ export default function handler(
     return {
       body,
       statusCode,
+      // Configure CORS in the Headers
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Credentials": true,
+      },
     };
   };
 }
