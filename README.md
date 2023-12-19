@@ -1990,6 +1990,7 @@ new Api(this, "Api", {
 - The two steps we’ve taken above ensure that if our `Lambda functions` are invoked through `API Gateway`, it’ll `respond` with the `proper CORS config`.
 
 ```ts
+// packages/core/src/handler.ts
 import { Context, APIGatewayProxyEvent } from "aws-lambda";
 
 export default function handler(
@@ -2035,11 +2036,12 @@ export default function handler(
 
 - Let’s `enable` `CORS` for our `S3 bucket`.
 
-- Add `CORS` rules to the bucket in `stacksStorageStack.ts`
+- Add `CORS` rules to the bucket in `stacks/StorageStack.ts`
 
 - Note that, you can customize this configuration to use `your own domain` or a list of domains. We’ll use these `default settings` for now.
 
 ```ts
+// stacks/StorageStack.ts
 import { StackContext, Bucket, Table } from "sst/constructs";
 
 export function StorageStack({ stack }: StackContext) {
@@ -2078,6 +2080,436 @@ export function StorageStack({ stack }: StackContext) {
 |  AuthStack PUBLISH_ASSETS_COMPLETE
 ⠋  Deploying...
 ✔  Deployed:
+```
+
+---
+
+### Create a New React.js App
+
+- We are now ready to work on our frontend.
+- So far we’ve built and deployed our `backend API and infrastructure`.
+- We are now going to build a web app that connects to our backend.
+- We are going to create a single page app using `React.js`.
+- We’ll use the `Vite` project to set everything up.
+
+### Create a New React App
+
+- In the `packages/` directory run `npm create vite frontend -- --template react-ts`
+- `cd frontend`
+- `npm install`
+
+### Loading SST Environment Variables
+
+- We also want to load the `environment variables` from our `backend`.
+- To do this, we’ll be using the `sst bind CLI`.
+- It’ll find the `environment variables` from our `SST app` and load it while starting the React development environment.
+- We’ll set these environment variables below.
+
+- Run the following in the `packages/frontend/` directory
+
+  - `npm install --save-dev sst`
+
+- To use the `sst bind CLI` we add it to our `packages/frontend/package.json` `scripts` to the `dev` `script` :
+
+```json
+// packages/frontend/package.json
+"scripts": {
+  // "dev": "vite",
+  "dev": "sst bind vite",
+}
+```
+
+### Add the React App to SST
+
+- We are going to be deploying our React app to `AWS`. To do that we’ll be using the `SST` `StaticSite` `construct`.
+
+- Create a new file `stacks/FrontendStack.ts`:
+
+- We are creating a new stack in SST. We could’ve used one of the existing stacks but this allows us to show how to connect stacks together.
+
+- We are pointing our `StaticSite` construct to the `packages/frontend/` directory where our `React` app is.
+- We are `passing in the outputs from our other stacks` as `environment variables` in Vite. This means that `we won’t have to hard code them` in our React app.
+- The `VITE_*` prefix is a convention Vite uses to say that we want to access these in our frontend code.
+- And finally, we are outputting out the URL of our React app.
+
+```ts
+// stacks/FrontendStack.ts
+import { StackContext, StaticSite, use } from "sst/constructs";
+import { ApiStack } from "./ApiStack";
+import { AuthStack } from "./AuthStack";
+import { StorageStack } from "./StorageStack";
+
+export function FrontendStack({ stack, app }: StackContext) {
+  const { api } = use(ApiStack);
+  const { auth } = use(AuthStack);
+  const { bucket } = use(StorageStack);
+
+  // Define our React app
+  const site = new StaticSite(stack, "ReactSite", {
+    path: "packages/frontend",
+    buildCommand: "pnpm run build",
+    buildOutput: "dist",
+    // Pass in our environment variables
+    environment: {
+      VITE_API_URL: api.url,
+      VITE_REGION: app.region,
+      VITE_BUCKET: bucket.bucketName,
+      VITE_USER_POOL_ID: auth.userPoolId,
+      VITE_USER_POOL_CLIENT_ID: auth.userPoolClientId,
+      VITE_IDENTITY_POOL_ID: auth.cognitoIdentityPoolId || "",
+    },
+  });
+
+  // Show the url in the output
+  stack.addOutputs({
+    SiteUrl: site.url,
+  });
+}
+```
+
+### Adding to the App
+
+- Let’s add this new stack to the rest of our app.
+
+- Open `sst.config.ts` and add the `FrontendStack` to the `stacks` function:
+
+```ts
+// sst.config.ts
+import { SSTConfig } from "sst";
+// import { API } from "./stacks/MyStack";
+import { StorageStack } from "./stacks/StorageStack";
+import { ApiStack } from "./stacks/ApiStack";
+import { AuthStack } from "./stacks/AuthStack";
+import { FrontendStack } from "./stacks/FrontendStack";
+
+export default {
+  config(_input) {
+    return {
+      name: "notes",
+      region: "eu-west-2",
+    };
+  },
+  stacks(app) {
+    app
+      .stack(StorageStack)
+      .stack(ApiStack)
+      .stack(AuthStack)
+      .stack(FrontendStack);
+  },
+} satisfies SSTConfig;
+```
+
+### Start the React App
+
+- Let’s start our React development environment from `packages/frontend`
+
+  - `npm run dev`
+
+- SST doesn’t deploy your frontend while you are working locally. This is because most frontends come with their own local dev environments.
+
+### Change the Title
+
+- Open up `packages/frontend/index.html` and edit the `title` tag to the following:
+
+  - `<title>Scratch - A simple note taking app</title>`
+
+- Now we are ready to `build` our frontend! We are going to start by creating our app icon and updating the favicons.
+
+---
+
+### Add App Favicons
+
+- Skip instructions
+
+### Set up Custom Fonts
+
+- Skip instructions
+
+### Set up Bootstrap
+
+- From `packages/frontend` run:
+  - `npm install --save bootstrap react-bootstrap react-icons`
+  - `npm install --save-dev @types/bootstrap @types/react-bootstrap`
+
+### Add Bootstrap Styles
+
+- In `packages/frontend/src/main.tsx` above `import "./index.css"` add:
+
+```tsx
+// packages/frontend/src/main.tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App.tsx";
+// Add BootStrap Styles:
+import "bootstrap/dist/css/bootstrap.min.css";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+```
+
+### Handle Routes with React Router
+
+- From `packages/frontend` run:
+  - `npm install --save react-router-dom`
+
+### Setting up React Router
+
+- In `packages/frontend/src/main.tsx`
+
+```tsx
+// packages/frontend/src/main.tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import App from "./App.tsx";
+import "bootstrap/dist/css/bootstrap.min.css";
+import "./index.css";
+
+// Wrap the App in BrowserRouter
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </React.StrictMode>
+);
+```
+
+### Create Containers
+
+### Add a Navbar
+
+- To `packages/frontend/src/App.tsx`
+
+We are doing a few things here:
+
+- Creating a fixed width container using Bootstrap in div.container.
+- Using a couple of Bootstrap spacing utility classes (like mb-# and py-#) to add margin bottom (mb) and padding vertical (py). These use a proportional set of spacer units to give a more harmonious feel to our UI.
+
+```tsx
+import Navbar from "react-bootstrap/Navbar";
+import "./App.css";
+
+function App() {
+  return (
+    <div className="App container py-3">
+      <Navbar collapseOnSelect bg="light" expand="md" className="mb-3 px-3">
+        <Navbar.Brand className="fw-bold text-muted">Scratch</Navbar.Brand>
+        <Navbar.Toggle />
+      </Navbar>
+    </div>
+  );
+}
+
+export default App;
+```
+
+- Let’s clear out the styles that came with our template.
+
+```css
+/* src/App.css */
+.App {
+}
+```
+
+### Add the Home Container
+
+- Create `packages/frontend/src/containers`
+
+- Create `packages/frontend/src/containers/Home.tsx`
+
+```tsx
+// packages/frontend/src/containers/Home.tsx
+import "./Home.css";
+
+export default function Home() {
+  return (
+    <div className="Home">
+      <div className="lander">
+        <h1>Scratch</h1>
+        <p className="text-muted">A simple note taking app</p>
+      </div>
+    </div>
+  );
+}
+```
+
+- Create `packages/frontend/src/containers/Home.css`
+
+```css
+.Home .lander {
+  padding: 80px 0;
+  text-align: center;
+}
+
+.Home .lander h1 {
+  font-family: "Open Sans", sans-serif;
+  font-weight: 600;
+}
+```
+
+### Set up the Routes
+
+- Now we’ll set up the routes so that we can have this container respond to the `/` route.
+- Create `packages/frontend/src/Routes.tsx`
+
+```tsx
+// packages/frontend/src/Routes.tsx
+import { Route, Routes } from "react-router-dom";
+import Home from "./containers/Home.tsx";
+
+export default function Links() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+    </Routes>
+  );
+}
+```
+
+### Render the Routes
+
+- Now let’s render the routes into our `App` component
+- This ensures that as we navigate to different routes in our app, the portion below the navbar will change to reflect that.
+- Add `Routes` to `packages/frontend/src/App.tsx`
+
+```tsx
+// packages/frontend/src/App.tsx
+import Navbar from "react-bootstrap/Navbar";
+import Routes from "./Routes.tsx";
+import "./App.css";
+
+function App() {
+  return (
+    <div className="App container py-3">
+      <Navbar collapseOnSelect bg="light" expand="md" className="mb-3 px-3">
+        <Navbar.Brand className="fw-bold text-muted">Scratch</Navbar.Brand>
+        <Navbar.Toggle />
+      </Navbar>
+      <Routes />
+    </div>
+  );
+}
+
+export default App;
+```
+
+### Adding Links in the Navbar
+
+- Now that we have our first route set up, let’s add a couple of links to the navbar of our app.
+- These will direct users to `login` or `signup` for our app when they first visit it.
+
+- This adds two links to our navbar inside the `Nav` Bootstrap component.
+- The `Navbar.Collapse` component ensures that on mobile devices the two links will be collapsed.
+- We also added a link to the Scratch logo. It links back to the homepage of our app.
+- `import Nav from "react-bootstrap/Nav";` at the top
+
+```tsx
+// packages/frontend/src/App.tsx
+import Navbar from "react-bootstrap/Navbar";
+import Nav from "react-bootstrap/Nav";
+import Routes from "./Routes.tsx";
+import "./App.css";
+
+function App() {
+  return (
+    <div className="App container py-3">
+      <Navbar collapseOnSelect bg="light" expand="md" className="mb-3 px-3">
+        <Navbar.Brand className="fw-bold text-muted">Scratch</Navbar.Brand>
+        <Navbar.Toggle />
+        <Navbar.Collapse className="justify-content-end">
+          <Nav>
+            <Nav.Link href="/signup">Signup</Nav.Link>
+            <Nav.Link href="/login">Login</Nav.Link>
+          </Nav>
+        </Navbar.Collapse>
+      </Navbar>
+      <Routes />
+    </div>
+  );
+}
+
+export default App;
+```
+
+- `npm install --save react-router-bootstrap`
+- `npm install --save-dev @types/react-router-bootstrap`
+
+- We will now wrap our links with the `LinkContainer`. Adjust the `App` function component in `packages/frontend/src/App.tsx`
+-
+
+```tsx
+// packages/frontend/src/App.tsx
+import Navbar from "react-bootstrap/Navbar";
+import Nav from "react-bootstrap/Nav";
+import { LinkContainer } from "react-router-bootstrap";
+import Routes from "./Routes.tsx";
+import "./App.css";
+
+function App() {
+  return (
+    <div className="App container py-3">
+      <Navbar collapseOnSelect bg="light" expand="md" className="mb-3 px-3">
+        <LinkContainer to="/">
+          <Navbar.Brand className="fw-bold text-muted">Scratch</Navbar.Brand>
+        </LinkContainer>
+        <Navbar.Toggle />
+        <Navbar.Collapse className="justify-content-end">
+          <Nav activeKey={window.location.pathname}>
+            <LinkContainer to="/signup">
+              <Nav.Link>Signup</Nav.Link>
+            </LinkContainer>
+            <LinkContainer to="/login">
+              <Nav.Link>Login</Nav.Link>
+            </LinkContainer>
+          </Nav>
+        </Navbar.Collapse>
+      </Navbar>
+      <Routes />
+    </div>
+  );
+}
+
+export default App;
+```
+
+### Handle 404s
+
+- In `packages/frontend/src/containers/` create `NotFound.jsx` and `NotFound.css`
+
+```tsx
+// packages/frontend/src/containers/NotFound.tsx
+import "./NotFound.css";
+
+export default function NotFound() {
+  return (
+    <div className="NotFound text-center">
+      <h3>Sorry, page not found!</h3>
+    </div>
+  );
+}
+```
+
+- Add the Route to `packages/frontend/src/Routes.tsx`
+
+```tsx
+// packages/frontend/src/Routes.tsx
+import { Route, Routes } from "react-router-dom";
+import Home from "./containers/Home.tsx";
+import NotFound from "./containers/NotFound.tsx";
+
+export default function Links() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="*" element={<NotFound />} />;
+    </Routes>
+  );
+}
 ```
 
 ---
